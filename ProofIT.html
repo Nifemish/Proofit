@@ -1,0 +1,1677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ProofIT — Generate Professional Documents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<!-- React + Babel (transforms JSX in-browser) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: #0B0F19; color: #fff; font-family: 'Sora', system-ui, sans-serif; min-height: 100vh; }
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0B0F19; } ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  select option { background: #1F2937; color: #fff; }
+  @keyframes pulse { 0%,100%{opacity:.6;transform:scale(1)} 50%{opacity:1;transform:scale(1.1)} }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(28px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  @keyframes shimmer { 0%{opacity:.4} 50%{opacity:.8} 100%{opacity:.4} }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="boot-loader" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0B0F19;color:#D1D5DB;font-family:'Sora',system-ui,sans-serif;">
+    <div style="width:44px;height:44px;border-radius:50%;border:3px solid #1F2937;border-top-color:#3B82F6;animation:spin 1s linear infinite;"></div>
+    <div style="font-size:14px;">Loading ProofIT…</div>
+  </div>
+</div>
+<div id="boot-error" style="display:none;position:fixed;inset:0;background:#0B0F19;color:#fff;padding:24px;font-family:'Sora',system-ui,sans-serif;overflow:auto;z-index:9999;">
+  <h2 style="color:#F87171;margin-bottom:12px;font-size:18px;">Startup error</h2>
+  <pre id="boot-error-msg" style="white-space:pre-wrap;color:#D1D5DB;font-size:13px;background:#111827;padding:14px;border-radius:8px;border:1px solid #1F2937;"></pre>
+  <p style="margin-top:12px;color:#9CA3AF;font-size:12px;">If you opened this file directly from your phone (content:// URL), try hosting it on a web server or opening it in desktop Chrome — some browsers block ES module imports from local files.</p>
+</div>
+<script>
+  (function () {
+    function showErr(msg) {
+      var el = document.getElementById("boot-error");
+      var m = document.getElementById("boot-error-msg");
+      if (el && m) { m.textContent = String(msg); el.style.display = "block"; }
+    }
+    window.addEventListener("error", function (e) { showErr((e.error && (e.error.stack || e.error.message)) || e.message || "Unknown error"); });
+    window.addEventListener("unhandledrejection", function (e) { showErr((e.reason && (e.reason.stack || e.reason.message)) || e.reason || "Unhandled promise rejection"); });
+  })();
+</script>
+
+<!-- Load Firebase as a real ES module so dynamic import() is not parsed by Babel -->
+<script type="module">
+  (async () => {
+    try {
+      const [appM, authM, fsM, stM] = await Promise.all([
+        import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"),
+        import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"),
+        import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"),
+        import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js"),
+      ]);
+      window.__FB_SDK__ = { app: appM, auth: authM, fs: fsM, st: stM };
+    } catch (err) {
+      window.__FB_SDK_ERROR__ = err && (err.message || String(err)) || "Failed to load Firebase SDK";
+    } finally {
+      window.dispatchEvent(new Event("fb-sdk-ready"));
+    }
+  })();
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, createContext, useContext } = React;
+
+// ─── Firebase Config ───────────────────────────────────────────────────────────
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBW9R594XCTxr6rx2rRLnAz2cWNefOYSyY",
+  authDomain: "proofit-9ebdb.firebaseapp.com",
+  projectId: "proofit-9ebdb",
+  storageBucket: "proofit-9ebdb.firebasestorage.app",
+  messagingSenderId: "998816976763",
+  appId: "1:998816976763:web:04a2220f3b2208defab7de",
+};
+
+// ─── Firebase CDN loader (reads SDK preloaded by the module script above) ─────
+let _fb = null;
+function _waitForSdk() {
+  return new Promise((resolve, reject) => {
+    function check() {
+      if (window.__FB_SDK_ERROR__) return reject(new Error(window.__FB_SDK_ERROR__));
+      if (window.__FB_SDK__) return resolve(window.__FB_SDK__);
+      return null;
+    }
+    const immediate = check();
+    if (immediate !== null) return;
+    window.addEventListener("fb-sdk-ready", () => {
+      if (window.__FB_SDK_ERROR__) reject(new Error(window.__FB_SDK_ERROR__));
+      else resolve(window.__FB_SDK__);
+    }, { once: true });
+    // Safety timeout
+    setTimeout(() => {
+      if (!window.__FB_SDK__ && !window.__FB_SDK_ERROR__) {
+        reject(new Error("Timed out loading Firebase SDK. Check your internet connection or try opening this file from a web server (http/https) instead of a local content:// URL."));
+      }
+    }, 20000);
+  });
+}
+async function loadFirebase(cfg) {
+  if (_fb) return _fb;
+  const sdk = await _waitForSdk();
+  const { initializeApp, getApps, getApp } = sdk.app;
+  const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile } = sdk.auth;
+  const { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, where, orderBy, getDocs, serverTimestamp, updateDoc, deleteDoc } = sdk.fs;
+  const { getStorage, ref, uploadBytes, getDownloadURL } = sdk.st;
+  const app = getApps().length ? getApp() : initializeApp(cfg);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const storage = getStorage(app);
+  _fb = {
+    app, auth, db, storage,
+    register: (email, pw) => createUserWithEmailAndPassword(auth, email, pw),
+    login: (email, pw) => signInWithEmailAndPassword(auth, email, pw),
+    logout: () => signOut(auth),
+    updateProfile: (u, d) => updateProfile(u, d),
+    onAuthStateChanged: (cb) => onAuthStateChanged(auth, cb),
+    setDoc, getDoc, doc, collection, addDoc, query, where, orderBy, getDocs, serverTimestamp, updateDoc, deleteDoc,
+    ref, uploadBytes, getDownloadURL,
+  };
+  return _fb;
+}
+
+// ─── Theme ────────────────────────────────────────────────────────────────────
+const C = { bg0:"#0B0F19", bg1:"#111827", accent:"#2563EB", accent2:"#3B82F6", success:"#10B981", text:"#FFFFFF", muted:"#D1D5DB", dim:"#6B7280" };
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
+const IC = {
+  shield:"M12 2L3 7v5c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V7l-9-5z",
+  zap:"M13 2L3 14h9l-1 8 10-12h-9l1-8z",
+  clock:"M12 2a10 10 0 100 20A10 10 0 0012 2zm0 5v5l3 3",
+  eye:"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zm11-3a3 3 0 100 6 3 3 0 000-6z",
+  lock:"M19 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2zM7 11V7a5 5 0 0110 0v4",
+  mobile:"M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z",
+  file:"M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm0 0v6h6",
+  id:"M2 9a3 3 0 013-3h14a3 3 0 013 3v6a3 3 0 01-3 3H5a3 3 0 01-3-3V9zm5 0a2 2 0 100 4 2 2 0 000-4zm0 5h.01M11 10h6m-6 3h4",
+  passport:"M4 4h16v16H4V4zm4 4h8m-8 4h6m-6 4h4",
+  military:"M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7l2-7z",
+  document:"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
+  check:"M20 6L9 17l-5-5",
+  x:"M18 6L6 18M6 6l12 12",
+  menu:"M3 12h18M3 6h18M3 18h18",
+  arrow:"M5 12h14M12 5l7 7-7 7",
+  upload:"M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12",
+  grid:"M3 3h7v7H3V3zm11 0h7v7h-7V3zm0 11h7v7h-7v-7zM3 14h7v7H3v-7z",
+  user:"M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z",
+  star:"M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
+  download:"M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3",
+  camera:"M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2v11zM12 17a4 4 0 100-8 4 4 0 000 8z",
+  settings:"M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z",
+  logout:"M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9",
+  home:"M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z",
+  layers:"M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+  creditCard:"M1 4h22v16H1V4zm0 6h22",
+  activity:"M22 12h-4l-3 9L9 3l-3 9H2",
+  firebase:"M4.29 18.98L7.18 2.28a.49.49 0 01.93-.06l2.96 5.47 1.36-2.56a.49.49 0 01.87 0l6.44 13.85H4.29z",
+  alertCircle:"M12 22a10 10 0 100-20 10 10 0 000 20zm0-7v-3m0 6h.01",
+  trash:"M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6",
+  edit:"M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z",
+  plus:"M12 5v14M5 12h14",
+  refresh:"M23 4v6h-6M1 20v-6h6M3.5 9A9 9 0 0121 15M20.5 15A9 9 0 013 9",
+};
+
+const Icon = ({ d, size=20, stroke="currentColor", fill="none" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke}
+    strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}>
+    <path d={d} />
+  </svg>
+);
+
+// ─── UI Primitives ─────────────────────────────────────────────────────────────
+const Glass = ({ children, style={}, onClick, className="" }) => (
+  <div onClick={onClick} className={className} style={{
+    background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)",
+    borderRadius:16, backdropFilter:"blur(20px)", ...style,
+  }}>{children}</div>
+);
+
+const Btn = ({ children, variant="primary", onClick, style={}, disabled=false, type="button" }) => {
+  const v = {
+    primary:{ background:"linear-gradient(135deg,#2563EB,#3B82F6)", color:"#fff", boxShadow:"0 4px 20px rgba(37,99,235,0.35)", border:"none" },
+    ghost:{ background:"rgba(255,255,255,0.06)", color:"#D1D5DB", border:"1px solid rgba(255,255,255,0.1)" },
+    danger:{ background:"rgba(239,68,68,0.15)", color:"#F87171", border:"1px solid rgba(239,68,68,0.25)" },
+    success:{ background:"linear-gradient(135deg,#059669,#10B981)", color:"#fff", boxShadow:"0 4px 16px rgba(16,185,129,0.3)", border:"none" },
+    warning:{ background:"rgba(245,158,11,0.15)", color:"#FBBF24", border:"1px solid rgba(245,158,11,0.25)" },
+  };
+  return (
+    <button type={type} disabled={disabled} onClick={onClick} style={{
+      display:"inline-flex", alignItems:"center", gap:8, padding:"11px 24px",
+      borderRadius:10, fontWeight:600, fontSize:14, cursor:disabled?"not-allowed":"pointer",
+      transition:"all 0.2s", outline:"none", opacity:disabled?0.5:1,
+      letterSpacing:"0.02em", fontFamily:"inherit", ...v[variant], ...style,
+    }}>{children}</button>
+  );
+};
+
+const Badge = ({ children, color=C.accent2 }) => (
+  <span style={{ background:`${color}20`, color, fontSize:11, fontWeight:700,
+    padding:"3px 10px", borderRadius:20, border:`1px solid ${color}30`,
+    letterSpacing:"0.05em", textTransform:"uppercase", whiteSpace:"nowrap" }}>
+    {children}
+  </span>
+);
+
+const iStyle = {
+  background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)",
+  borderRadius:10, padding:"12px 14px", color:"#fff", fontSize:14, outline:"none",
+  width:"100%", boxSizing:"border-box", fontFamily:"inherit",
+};
+
+const Input = ({ label, type="text", value, onChange, placeholder, options, required }) => (
+  <label style={{ display:"flex", flexDirection:"column", gap:7 }}>
+    {label && <span style={{ fontSize:12, fontWeight:600, color:C.muted, letterSpacing:"0.04em" }}>{label}{required && " *"}</span>}
+    {type === "select" ? (
+      <select value={value||""} onChange={onChange} style={iStyle}>
+        <option value="">Select…</option>
+        {options?.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    ) : (
+      <input type={type} value={value||""} onChange={onChange} placeholder={placeholder}
+        style={{ ...iStyle, colorScheme:type==="date"?"dark":undefined }} />
+    )}
+  </label>
+);
+
+const Toast = ({ msg, type="success", onClose }) => (
+  <div style={{
+    position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", zIndex:9999,
+    background:type==="error"?"rgba(239,68,68,0.15)":type==="warning"?"rgba(245,158,11,0.15)":"rgba(16,185,129,0.15)",
+    border:`1px solid ${type==="error"?"rgba(239,68,68,0.3)":type==="warning"?"rgba(245,158,11,0.3)":"rgba(16,185,129,0.3)"}`,
+    borderRadius:12, padding:"12px 20px", display:"flex", alignItems:"center", gap:12,
+    backdropFilter:"blur(20px)", maxWidth:420, width:"90%",
+  }}>
+    <Icon d={type==="error"?IC.alertCircle:IC.check} size={18}
+      stroke={type==="error"?"#F87171":type==="warning"?"#FBBF24":"#10B981"} />
+    <span style={{ color:"#fff", fontSize:14, flex:1 }}>{msg}</span>
+    <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:C.dim }}><Icon d={IC.x} size={16} /></button>
+  </div>
+);
+
+const Spinner = ({ size=20 }) => (
+  <div style={{ width:size, height:size, border:`2px solid rgba(255,255,255,0.1)`,
+    borderTop:`2px solid ${C.accent2}`, borderRadius:"50%",
+    animation:"spin 0.7s linear infinite" }} />
+);
+
+// ─── Template Data ─────────────────────────────────────────────────────────────
+const CATEGORIES = [
+  { id:"state", icon:IC.id, name:"State IDs", count:4, color:"#3B82F6", templates:["Driver's License","REAL ID","State ID Card","Enhanced ID Card"] },
+  { id:"federal", icon:IC.passport, name:"Federal Documents", count:4, color:"#8B5CF6", templates:["U.S. Passport","Passport Card","Green Card","Employment Authorization"] },
+  { id:"military", icon:IC.military, name:"Military IDs", count:3, color:"#F59E0B", templates:["Military ID","Dependent ID","Government Employee ID"] },
+  { id:"tribal", icon:IC.id, name:"Tribal IDs", count:2, color:"#10B981", templates:["Tribal Photo ID","Native American Tribal ID"] },
+  { id:"other", icon:IC.document, name:"Other Documents", count:4, color:"#EC4899", templates:["Birth Certificate","Social Security Card","Medicare Card","Voter Registration Card"] },
+];
+const ALL_TEMPLATES = CATEGORIES.flatMap(c =>
+  c.templates.map((t,i) => ({ id:`${c.id}-${i}`, name:t, category:c.name, color:c.color, catId:c.id }))
+);
+const TEMPLATE_FIELDS = {
+  "state-0": [
+    { id:"fullName", label:"Full Name", type:"text", placeholder:"JOHN DOE" },
+    { id:"dob", label:"Date of Birth", type:"date" },
+    { id:"address", label:"Street Address", type:"text", placeholder:"123 Main St" },
+    { id:"city", label:"City", type:"text", placeholder:"Los Angeles" },
+    { id:"state", label:"State", type:"select", options:["CA","NY","TX","FL","IL","WA","AZ","CO","GA","NC"] },
+    { id:"zip", label:"ZIP Code", type:"text", placeholder:"90210" },
+    { id:"idNumber", label:"License Number", type:"text", placeholder:"D1234567" },
+    { id:"expiry", label:"Expiration Date", type:"date" },
+    { id:"gender", label:"Gender", type:"select", options:["M","F","X"] },
+    { id:"height", label:"Height", type:"text", placeholder:"5'10\"" },
+    { id:"eyeColor", label:"Eye Color", type:"select", options:["BRN","BLU","GRN","HZL","GRY"] },
+    { id:"photo", label:"Photo Upload", type:"photo" },
+    { id:"signature", label:"Signature Upload", type:"signature" },
+  ],
+  default: [
+    { id:"fullName", label:"Full Name", type:"text", placeholder:"JOHN DOE" },
+    { id:"dob", label:"Date of Birth", type:"date" },
+    { id:"address", label:"Address", type:"text", placeholder:"123 Main St, City, State" },
+    { id:"idNumber", label:"Document Number", type:"text", placeholder:"A1234567" },
+    { id:"expiry", label:"Expiration Date", type:"date" },
+    { id:"gender", label:"Gender", type:"select", options:["M","F","X"] },
+    { id:"photo", label:"Photo Upload", type:"photo" },
+    { id:"signature", label:"Signature Upload", type:"signature" },
+  ],
+};
+const getFields = (idOrTemplate) => {
+  if (idOrTemplate && typeof idOrTemplate === "object") {
+    if (Array.isArray(idOrTemplate.fields) && idOrTemplate.fields.length) return idOrTemplate.fields;
+    return TEMPLATE_FIELDS[idOrTemplate.baseId || idOrTemplate.id] || TEMPLATE_FIELDS.default;
+  }
+  return TEMPLATE_FIELDS[idOrTemplate] || TEMPLATE_FIELDS.default;
+};
+const ADMIN_EMAIL = "nifemish@gmail.com";
+const slugify = (s) => String(s||"").toLowerCase().trim().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"") || ("f_"+Math.random().toString(36).slice(2,7));
+const fileToDataURL = (file) => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(file); });
+const loadImg = (src) => new Promise((res,rej)=>{ const i=new Image(); i.crossOrigin="anonymous"; i.onload=()=>res(i); i.onerror=rej; i.src=src; });
+
+// Auto-detect fields from a template image using Google Gemini Vision.
+// Admin sets their own API key in Admin → AI Key (stored locally).
+async function aiDetectFields(dataURL) {
+  const key = localStorage.getItem("proofit_gemini_key");
+  if (!key) throw new Error("No Gemini API key. Add one in Admin → AI Key.");
+  const b64 = dataURL.split(",")[1];
+  const mime = (dataURL.match(/data:(.*?);/)||[])[1] || "image/png";
+  const body = {
+    contents: [{ parts: [
+      { inline_data: { mime_type: mime, data: b64 } },
+      { text: "Analyze this document/ID template image. Detect EVERY fillable field, placeholder line, photo box, or signature area. For each return a JSON object with keys: label (string), type (text|date|select|textarea|photo|signature), x (left 0-1 from image left), y (top 0-1), w (width 0-1), h (height 0-1), fontSize (fraction of image height, e.g. 0.025), fontColor (hex), align (left|center|right). For 'select' type include options:[\"...\"]. Respond with ONLY a JSON array, no prose, no markdown." }
+    ]}],
+    generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+  };
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error("AI request failed: " + r.status);
+  const j = await r.json();
+  const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+  let arr;
+  try { arr = JSON.parse(txt); } catch { const m = txt.match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; }
+  if (!Array.isArray(arr)) throw new Error("AI returned non-array");
+  return arr.map((f,i) => ({
+    id: slugify(f.label||("field_"+i)),
+    label: f.label || `Field ${i+1}`,
+    type: ["text","date","select","textarea","photo","signature"].includes(f.type) ? f.type : "text",
+    options: Array.isArray(f.options) ? f.options : undefined,
+    x: Math.max(0, Math.min(1, +f.x||0)),
+    y: Math.max(0, Math.min(1, +f.y||0)),
+    w: Math.max(0.02, Math.min(1, +f.w||0.2)),
+    h: Math.max(0.01, Math.min(1, +f.h||0.04)),
+    fontSize: Math.max(0.005, Math.min(0.2, +f.fontSize||0.025)),
+    fontColor: f.fontColor || "#111111",
+    align: ["left","center","right"].includes(f.align) ? f.align : "left",
+    placeholder: f.label || "",
+  }));
+}
+
+// Render the final document onto a canvas matching the template image's natural size.
+async function renderToCanvas(template, formData, imageMap) {
+  const img = await loadImg(template.imageURL);
+  const cvs = document.createElement("canvas");
+  cvs.width = img.naturalWidth; cvs.height = img.naturalHeight;
+  const ctx = cvs.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  const fields = getFields(template);
+  for (const f of fields) {
+    const px = (f.x||0) * cvs.width;
+    const py = (f.y||0) * cvs.height;
+    const pw = (f.w||0.2) * cvs.width;
+    const ph = (f.h||0.04) * cvs.height;
+    if (f.type === "photo" || f.type === "signature" || f.type === "image") {
+      const src = imageMap[f.id];
+      if (src) {
+        try {
+          const sub = await loadImg(src);
+          const ratio = Math.min(pw/sub.naturalWidth, ph/sub.naturalHeight);
+          const dw = sub.naturalWidth*ratio, dh = sub.naturalHeight*ratio;
+          ctx.drawImage(sub, px+(pw-dw)/2, py+(ph-dh)/2, dw, dh);
+        } catch {}
+      }
+    } else {
+      const text = String(formData[f.id]||"");
+      if (!text) continue;
+      const size = Math.max(8, (f.fontSize||0.025) * cvs.height);
+      ctx.font = `${f.fontWeight||600} ${size}px Sora, Arial, sans-serif`;
+      ctx.fillStyle = f.fontColor || "#111";
+      ctx.textBaseline = "top";
+      ctx.textAlign = f.align||"left";
+      const tx = f.align==="center" ? px+pw/2 : f.align==="right" ? px+pw : px;
+      ctx.fillText(text, tx, py, pw);
+    }
+  }
+  return cvs.toDataURL("image/png");
+}
+
+// ─── Animated Background ───────────────────────────────────────────────────────
+const AnimBg = () => (
+  <div style={{ position:"fixed", inset:0, zIndex:0, overflow:"hidden", pointerEvents:"none" }}>
+    {[
+      { w:600,h:600,c:"rgba(37,99,235,0.12)",t:"-10%",l:"60%",d:"8s",delay:"0s" },
+      { w:500,h:500,c:"rgba(139,92,246,0.08)",t:"auto",b:"10%",l:"-10%",d:"10s",delay:"1s" },
+      { w:400,h:400,c:"rgba(16,185,129,0.06)",t:"30%",l:"40%",d:"12s",delay:"2s" },
+    ].map((o,i) => (
+      <div key={i} style={{ position:"absolute", width:o.w, height:o.h, borderRadius:"50%",
+        background:`radial-gradient(circle,${o.c} 0%,transparent 70%)`,
+        top:o.t||"auto", bottom:o.b||"auto", left:o.l,
+        filter:"blur(40px)", animation:`pulse ${o.d} ease-in-out infinite ${o.delay}` }} />
+    ))}
+  </div>
+);
+
+// ─── Loading Screen ────────────────────────────────────────────────────────────
+const LoadingScreen = ({ error }) => (
+  <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:`linear-gradient(160deg,${C.bg0},${C.bg1})`, gap:16 }}>
+    <AnimBg />
+    <div style={{ position:"relative", zIndex:1, textAlign:"center" }}>
+      <div style={{ width:56, height:56, borderRadius:16, background:"linear-gradient(135deg,#2563EB,#3B82F6)",
+        display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 20px" }}>
+        <Icon d={IC.file} size={26} stroke="white" />
+      </div>
+      {error ? (
+        <>
+          <div style={{ color:"#F87171", fontSize:15, fontWeight:600, marginBottom:8 }}>Firebase Connection Failed</div>
+          <div style={{ color:C.dim, fontSize:13, maxWidth:340 }}>{error}</div>
+          <div style={{ color:C.dim, fontSize:12, marginTop:12, maxWidth:340 }}>
+            Make sure your Firebase project has Email/Password auth enabled and Firestore created.
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ marginBottom:12 }}><Spinner size={32} /></div>
+          <div style={{ color:C.muted, fontSize:14 }}>Connecting to Firebase…</div>
+        </>
+      )}
+    </div>
+  </div>
+);
+
+// ─── Nav ───────────────────────────────────────────────────────────────────────
+const Nav = ({ page, setPage, authUser, onLogout }) => (
+  <nav style={{ position:"fixed", top:0, left:0, right:0, zIndex:100, padding:"0 24px", height:64,
+    display:"flex", alignItems:"center", justifyContent:"space-between",
+    background:"rgba(11,15,25,0.88)", backdropFilter:"blur(20px)",
+    borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+    <button onClick={() => setPage("landing")} style={{ background:"none", border:"none",
+      cursor:"pointer", display:"flex", alignItems:"center", gap:10 }}>
+      <div style={{ width:32, height:32, borderRadius:8, background:"linear-gradient(135deg,#2563EB,#3B82F6)",
+        display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <Icon d={IC.file} size={17} stroke="white" />
+      </div>
+      <span style={{ fontFamily:"'Sora',sans-serif", fontSize:18, fontWeight:800, color:"#fff" }}>
+        Proof<span style={{ color:"#3B82F6" }}>IT</span>
+      </span>
+    </button>
+    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+      {!authUser ? (
+        <>
+          <Btn variant="ghost" onClick={() => setPage("login")} style={{ padding:"8px 18px" }}>Sign In</Btn>
+          <Btn variant="primary" onClick={() => setPage("register")} style={{ padding:"8px 18px" }}>Get Started</Btn>
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize:13, color:C.muted, marginRight:4 }}>{authUser.displayName || authUser.email}</div>
+          <Btn variant="ghost" onClick={() => setPage("dashboard")} style={{ padding:"8px 14px" }}>Dashboard</Btn>
+          <button onClick={onLogout} title="Sign Out" style={{ background:"rgba(255,255,255,0.05)",
+            border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:8, cursor:"pointer",
+            display:"flex", alignItems:"center" }}>
+            <Icon d={IC.logout} size={16} stroke={C.dim} />
+          </button>
+        </>
+      )}
+    </div>
+  </nav>
+);
+
+// ─── Landing ───────────────────────────────────────────────────────────────────
+const Landing = ({ setPage }) => {
+  const feats = [
+    { icon:IC.layers, title:"Template-Based Generation", desc:"Generate documents from professionally designed templates." },
+    { icon:IC.zap, title:"Instant Personalization", desc:"Replace names, photos, dates, addresses and more automatically." },
+    { icon:IC.shield, title:"Secure Processing", desc:"User data processed securely via Firebase with enterprise-grade encryption." },
+    { icon:IC.clock, title:"Fast Delivery", desc:"Generate personalized documents within seconds." },
+    { icon:IC.eye, title:"Watermarked Preview", desc:"Preview before downloading. No surprises." },
+    { icon:IC.mobile, title:"Mobile Friendly", desc:"Works perfectly on phones, tablets and desktops." },
+  ];
+  return (
+    <div style={{ minHeight:"100vh", paddingTop:64 }}>
+      <section style={{ minHeight:"88vh", display:"flex", flexDirection:"column", alignItems:"center",
+        justifyContent:"center", padding:"80px 24px 60px", textAlign:"center" }}>
+        <div style={{ animation:"fadeUp .7s ease both" }}>
+          <Badge color={C.accent2}>✦ Firebase-Powered Platform</Badge>
+        </div>
+        <h1 style={{ fontFamily:"'Sora',sans-serif", fontSize:"clamp(34px,6vw,72px)", fontWeight:900,
+          lineHeight:1.08, letterSpacing:"-0.04em", color:"#fff", margin:"22px 0 18px", maxWidth:800,
+          animation:"fadeUp .7s ease .1s both" }}>
+          Generate Professional<br />
+          <span style={{ background:"linear-gradient(135deg,#2563EB,#60A5FA)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
+            Personalized Documents
+          </span><br />in Seconds
+        </h1>
+        <p style={{ color:"#9CA3AF", fontSize:"clamp(15px,2vw,18px)", maxWidth:520, lineHeight:1.7,
+          margin:"0 0 36px", animation:"fadeUp .7s ease .2s both" }}>
+          Choose a template, enter your details, preview your document, and generate instantly.
+        </p>
+        <div style={{ display:"flex", gap:12, flexWrap:"wrap", justifyContent:"center", animation:"fadeUp .7s ease .3s both" }}>
+          <Btn variant="primary" onClick={() => setPage("register")} style={{ padding:"13px 30px", fontSize:15 }}>
+            Get Started <Icon d={IC.arrow} size={16} />
+          </Btn>
+          <Btn variant="ghost" onClick={() => document.getElementById("cats")?.scrollIntoView({ behavior:"smooth" })} style={{ padding:"13px 30px", fontSize:15 }}>
+            View Templates
+          </Btn>
+        </div>
+      </section>
+
+      <section style={{ padding:"70px 24px", maxWidth:1100, margin:"0 auto" }}>
+        <div style={{ textAlign:"center", marginBottom:48 }}>
+          <Badge color="#8B5CF6">Features</Badge>
+          <h2 style={{ fontFamily:"'Sora',sans-serif", fontSize:"clamp(26px,4vw,44px)", fontWeight:800, letterSpacing:"-0.03em", color:"#fff", margin:"14px 0 0" }}>Everything you need</h2>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:18 }}>
+          {feats.map((f,i) => (
+            <Glass key={i} style={{ padding:26 }}>
+              <div style={{ width:44,height:44,borderRadius:12,background:"rgba(37,99,235,0.12)",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:14 }}>
+                <Icon d={f.icon} size={22} stroke={C.accent2} />
+              </div>
+              <h3 style={{ fontFamily:"'Sora',sans-serif",fontSize:15,fontWeight:700,color:"#fff",marginBottom:7,marginTop:0 }}>{f.title}</h3>
+              <p style={{ color:"#9CA3AF",fontSize:13,lineHeight:1.6,margin:0 }}>{f.desc}</p>
+            </Glass>
+          ))}
+        </div>
+      </section>
+
+      <section id="cats" style={{ padding:"70px 24px", maxWidth:1100, margin:"0 auto" }}>
+        <div style={{ textAlign:"center", marginBottom:48 }}>
+          <Badge color="#10B981">Document Categories</Badge>
+          <h2 style={{ fontFamily:"'Sora',sans-serif",fontSize:"clamp(26px,4vw,44px)",fontWeight:800,letterSpacing:"-0.03em",color:"#fff",margin:"14px 0 0" }}>Choose your template</h2>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:14 }}>
+          {CATEGORIES.map(cat => (
+            <Glass key={cat.id} style={{ padding:22, position:"relative", overflow:"hidden", cursor:"pointer" }} onClick={() => setPage("register")}>
+              <div style={{ position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${cat.color},transparent)`,borderRadius:"16px 16px 0 0" }} />
+              <div style={{ width:46,height:46,borderRadius:13,background:`${cat.color}18`,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:14 }}>
+                <Icon d={cat.icon} size={22} stroke={cat.color} />
+              </div>
+              <h3 style={{ fontFamily:"'Sora',sans-serif",fontSize:14,fontWeight:700,color:"#fff",marginBottom:5,marginTop:0 }}>{cat.name}</h3>
+              <p style={{ color:C.dim,fontSize:12,margin:0 }}>{cat.count} Templates</p>
+            </Glass>
+          ))}
+        </div>
+      </section>
+
+      <section style={{ padding:"70px 24px", maxWidth:980, margin:"0 auto" }}>
+        <div style={{ textAlign:"center", marginBottom:48 }}>
+          <Badge color={C.accent2}>Pricing</Badge>
+          <h2 style={{ fontFamily:"'Sora',sans-serif",fontSize:"clamp(26px,4vw,44px)",fontWeight:800,letterSpacing:"-0.03em",color:"#fff",margin:"14px 0 0" }}>Simple pricing</h2>
+        </div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:18 }}>
+          {[
+            { name:"Starter",price:"$4.99",period:"per doc",features:["5 doc types","Watermark preview","Email delivery"],color:"#6B7280",popular:false },
+            { name:"Premium",price:"$29",period:"/ month",features:["All templates","Unlimited generations","Priority processing","API access"],color:"#3B82F6",popular:true },
+            { name:"Enterprise",price:"Custom",period:"",features:["Custom templates","Bulk generation","White-label","SLA + manager"],color:"#8B5CF6",popular:false },
+          ].map(plan => (
+            <Glass key={plan.name} style={{ padding:30, position:"relative",
+              border:plan.popular?`1px solid ${plan.color}40`:"1px solid rgba(255,255,255,0.08)",
+              boxShadow:plan.popular?`0 0 40px ${plan.color}12`:"none" }}>
+              {plan.popular && <div style={{ position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)" }}><Badge color={plan.color}>Most Popular</Badge></div>}
+              <div style={{ color:plan.color,fontSize:11,fontWeight:700,letterSpacing:"0.08em",marginBottom:8 }}>{plan.name.toUpperCase()}</div>
+              <div style={{ display:"flex",alignItems:"baseline",gap:4,marginBottom:14 }}>
+                <span style={{ fontSize:34,fontWeight:900,fontFamily:"'Sora',sans-serif",color:"#fff" }}>{plan.price}</span>
+                {plan.period && <span style={{ color:C.dim,fontSize:13 }}>{plan.period}</span>}
+              </div>
+              <ul style={{ listStyle:"none",padding:0,margin:"0 0 24px",display:"flex",flexDirection:"column",gap:9 }}>
+                {plan.features.map(f => (
+                  <li key={f} style={{ display:"flex",alignItems:"center",gap:9,fontSize:13,color:"#D1D5DB" }}>
+                    <Icon d={IC.check} size={14} stroke={plan.color} /> {f}
+                  </li>
+                ))}
+              </ul>
+              <Btn variant={plan.popular?"primary":"ghost"} style={{ width:"100%",justifyContent:"center" }} onClick={() => setPage("register")}>
+                {plan.name === "Enterprise" ? "Contact Sales" : "Get Started"}
+              </Btn>
+            </Glass>
+          ))}
+        </div>
+      </section>
+
+      <footer style={{ borderTop:"1px solid rgba(255,255,255,0.06)", padding:"36px 24px",
+        maxWidth:1100, margin:"0 auto", display:"flex", justifyContent:"space-between",
+        alignItems:"center", flexWrap:"wrap", gap:16 }}>
+        <span style={{ fontFamily:"'Sora',sans-serif",fontWeight:800,color:"#fff",fontSize:15 }}>
+          Proof<span style={{ color:"#3B82F6" }}>IT</span> <span style={{ color:C.dim,fontWeight:400,fontSize:13 }}>© 2025</span>
+        </span>
+        <div style={{ display:"flex",gap:20 }}>
+          {["Terms","Privacy","Contact","FAQ"].map(l => (
+            <button key={l} style={{ background:"none",border:"none",color:"#9CA3AF",fontSize:13,cursor:"pointer" }}>{l}</button>
+          ))}
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+// ─── Auth Page ─────────────────────────────────────────────────────────────────
+const AuthPage = ({ mode, setPage, fb, onAuth, showToast }) => {
+  const [form, setForm] = useState({ name:"", email:"", password:"", confirm:"" });
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const set = k => e => setForm(p => ({ ...p, [k]:e.target.value }));
+
+  const submit = async () => {
+    setErr(""); setLoading(true);
+    try {
+      if (mode === "register") {
+        if (form.password !== form.confirm) throw new Error("Passwords don't match.");
+        if (form.password.length < 6) throw new Error("Password must be at least 6 characters.");
+        const cred = await fb.register(form.email, form.password);
+        await fb.updateProfile(cred.user, { displayName: form.name });
+        await fb.setDoc(fb.doc(fb.db, "users", cred.user.uid), {
+          displayName:form.name, email:form.email,
+          createdAt:fb.serverTimestamp(), credits:0, plan:"free", totalGenerations:0,
+        });
+        showToast("Account created! Welcome to ProofIT.");
+        onAuth(cred.user);
+      } else {
+        const cred = await fb.login(form.email, form.password);
+        showToast("Welcome back!");
+        onAuth(cred.user);
+      }
+      setPage("dashboard");
+    } catch (e) {
+      const msgs = {
+        "auth/email-already-in-use":"Email already in use.",
+        "auth/invalid-email":"Invalid email address.",
+        "auth/wrong-password":"Incorrect password.",
+        "auth/user-not-found":"No account found with this email.",
+        "auth/invalid-credential":"Invalid email or password.",
+        "auth/too-many-requests":"Too many attempts. Try again later.",
+      };
+      setErr(msgs[e.code] || e.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"80px 24px 40px" }}>
+      <Glass style={{ width:"100%",maxWidth:420,padding:40 }}>
+        <div style={{ textAlign:"center",marginBottom:28 }}>
+          <div style={{ width:50,height:50,borderRadius:14,background:"linear-gradient(135deg,#2563EB,#3B82F6)",
+            display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px" }}>
+            <Icon d={IC.file} size={24} stroke="white" />
+          </div>
+          <h2 style={{ fontFamily:"'Sora',sans-serif",fontSize:22,fontWeight:800,color:"#fff",margin:"0 0 5px" }}>
+            {mode==="login"?"Welcome back":"Create account"}
+          </h2>
+          <p style={{ color:"#9CA3AF",fontSize:13,margin:0 }}>
+            {mode==="login"?"Sign in to your ProofIT account":"Start generating documents today"}
+          </p>
+        </div>
+        <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+          {mode==="register" && <Input label="Full Name" placeholder="John Doe" value={form.name} onChange={set("name")} />}
+          <Input label="Email" type="email" placeholder="you@example.com" value={form.email} onChange={set("email")} />
+          <Input label="Password" type="password" placeholder="••••••••" value={form.password} onChange={set("password")} />
+          {mode==="register" && <Input label="Confirm Password" type="password" placeholder="••••••••" value={form.confirm} onChange={set("confirm")} />}
+          {mode==="login" && (
+            <div style={{ display:"flex",justifyContent:"flex-end" }}>
+              <button style={{ background:"none",border:"none",color:C.accent2,fontSize:13,cursor:"pointer" }}>Forgot password?</button>
+            </div>
+          )}
+          {err && (
+            <div style={{ background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)",
+              borderRadius:8,padding:"10px 14px",color:"#FCA5A5",fontSize:13,display:"flex",gap:8,alignItems:"center" }}>
+              <Icon d={IC.alertCircle} size={15} stroke="#F87171" /> {err}
+            </div>
+          )}
+          <Btn variant="primary" onClick={submit} disabled={loading}
+            style={{ justifyContent:"center",padding:"13px 24px",fontSize:15,marginTop:4 }}>
+            {loading ? <><Spinner size={17} /> Please wait…</> : mode==="login"?"Sign In":"Create Account"}
+          </Btn>
+        </div>
+        <p style={{ textAlign:"center",color:"#9CA3AF",fontSize:13,marginTop:22 }}>
+          {mode==="login"?"Don't have an account? ":"Already have an account? "}
+          <button onClick={() => setPage(mode==="login"?"register":"login")}
+            style={{ background:"none",border:"none",color:C.accent2,cursor:"pointer",fontSize:13,fontWeight:600 }}>
+            {mode==="login"?"Create account":"Sign in"}
+          </button>
+        </p>
+      </Glass>
+    </div>
+  );
+};
+
+// ─── Template Card ─────────────────────────────────────────────────────────────
+const TCard = ({ t, onSelect }) => (
+  <Glass style={{ padding:18,cursor:"pointer" }} onClick={onSelect}>
+    <div style={{ height:90,borderRadius:9,background:`linear-gradient(135deg,${t.color}14,${t.color}05)`,
+      border:`1px solid ${t.color}20`,marginBottom:12,display:"flex",alignItems:"center",
+      justifyContent:"center",flexDirection:"column",gap:6 }}>
+      <Icon d={IC.id} size={28} stroke={t.color} />
+      <div style={{ fontSize:9,color:t.color,fontWeight:700,letterSpacing:"0.1em",opacity:0.7 }}>{t.category.toUpperCase()}</div>
+    </div>
+    <h4 style={{ fontFamily:"'Sora',sans-serif",fontSize:13,fontWeight:700,color:"#fff",margin:"0 0 3px" }}>{t.name}</h4>
+    <p style={{ color:C.dim,fontSize:11,margin:"0 0 12px" }}>{t.category}</p>
+    <Btn variant="primary" style={{ width:"100%",justifyContent:"center",padding:"8px 10px",fontSize:12 }}>Generate</Btn>
+  </Glass>
+);
+
+// ─── Dashboard ─────────────────────────────────────────────────────────────────
+const Dashboard = ({ setPage, setSelectedTemplate, authUser, fb, showToast, templates }) => {
+  const allTemplates = templates && templates.length ? templates : ALL_TEMPLATES;
+  const [tab, setTab] = useState("home");
+  const [sideOpen, setSideOpen] = useState(false);
+  const [userDoc, setUserDoc] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [profileForm, setProfileForm] = useState({ displayName:"", email:"" });
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (!authUser || !fb) return;
+    fb.getDoc(fb.doc(fb.db,"users",authUser.uid)).then(snap => {
+      if (snap.exists()) setUserDoc(snap.data());
+      else setUserDoc({ displayName:authUser.displayName, email:authUser.email, credits:0, plan:"free", totalGenerations:0 });
+    });
+    setProfileForm({ displayName:authUser.displayName||"", email:authUser.email||"" });
+  }, [authUser, fb]);
+
+  const loadHistory = useCallback(async () => {
+    if (!authUser || !fb) return;
+    setLoadingHistory(true);
+    try {
+      const q = fb.query(fb.collection(fb.db,"generations"),fb.where("userId","==",authUser.uid),fb.orderBy("createdAt","desc"));
+      const snap = await fb.getDocs(q);
+      setHistory(snap.docs.map(d => ({ id:d.id, ...d.data() })));
+    } catch {
+      try {
+        const q2 = fb.query(fb.collection(fb.db,"generations"),fb.where("userId","==",authUser.uid));
+        const snap2 = await fb.getDocs(q2);
+        setHistory(snap2.docs.map(d => ({ id:d.id,...d.data() })).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)));
+      } catch { setHistory([]); }
+    }
+    setLoadingHistory(false);
+  }, [authUser, fb]);
+
+  useEffect(() => { if (tab==="history") loadHistory(); }, [tab, loadHistory]);
+
+  const saveProfile = async () => {
+    setSavingProfile(true);
+    try {
+      await fb.updateProfile(authUser, { displayName:profileForm.displayName });
+      await fb.setDoc(fb.doc(fb.db,"users",authUser.uid),{ displayName:profileForm.displayName },{ merge:true });
+      setUserDoc(p => ({ ...p, displayName:profileForm.displayName }));
+      showToast("Profile updated!");
+    } catch { showToast("Failed to update profile.","error"); }
+    setSavingProfile(false);
+  };
+
+  const deleteGeneration = async (id) => {
+    try {
+      await fb.deleteDoc(fb.doc(fb.db,"generations",id));
+      setHistory(h => h.filter(g => g.id !== id));
+      showToast("Record deleted.");
+    } catch { showToast("Delete failed.","error"); }
+  };
+
+  const navItems = [
+    { id:"home", icon:IC.home, label:"Dashboard" },
+    { id:"templates", icon:IC.layers, label:"Templates" },
+    { id:"history", icon:IC.clock, label:"My History" },
+    { id:"settings", icon:IC.settings, label:"Settings" },
+  ];
+
+  const Sidebar = ({ mobile }) => (
+    <div style={{ width:mobile?"100%":220,
+      background:mobile?"rgba(11,15,25,0.97)":"rgba(17,24,39,0.6)",
+      borderRight:mobile?"none":"1px solid rgba(255,255,255,0.06)",
+      padding:"24px 14px", display:"flex", flexDirection:"column", gap:3,
+      backdropFilter:"blur(20px)",
+      ...(mobile?{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:200,paddingTop:80}:{}) }}>
+      {mobile && <button onClick={()=>setSideOpen(false)} style={{ position:"absolute",top:18,right:18,background:"none",border:"none",color:"#fff",cursor:"pointer" }}><Icon d={IC.x} size={22}/></button>}
+      <div style={{ padding:"6px 10px",marginBottom:8 }}>
+        <div style={{ fontSize:11,color:C.dim,fontWeight:700,letterSpacing:"0.1em" }}>MAIN MENU</div>
+      </div>
+      {navItems.map(item => (
+        <button key={item.id} onClick={()=>{setTab(item.id);if(mobile)setSideOpen(false);}}
+          style={{ display:"flex",alignItems:"center",gap:11,padding:"10px 12px",borderRadius:10,
+            border:"none",cursor:"pointer",fontSize:14,fontWeight:500,
+            background:tab===item.id?"rgba(37,99,235,0.15)":"transparent",
+            color:tab===item.id?C.accent2:"#9CA3AF",transition:"all 0.2s",width:"100%",fontFamily:"inherit" }}>
+          <Icon d={item.icon} size={17} stroke="currentColor" /> {item.label}
+        </button>
+      ))}
+      <div style={{ marginTop:"auto",padding:"12px 10px",borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:9 }}>
+          <div style={{ width:34,height:34,borderRadius:"50%",background:"linear-gradient(135deg,#2563EB,#8B5CF6)",
+            display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+            <Icon d={IC.user} size={16} stroke="white" />
+          </div>
+          <div>
+            <div style={{ fontSize:13,fontWeight:600,color:"#fff",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+              {authUser?.displayName || "User"}
+            </div>
+            <div style={{ fontSize:11,color:C.dim,textTransform:"capitalize" }}>{userDoc?.plan||"free"} plan</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const stats = [
+    { label:"Total Templates", value:allTemplates.length, icon:IC.layers, color:"#3B82F6" },
+    { label:"Documents Generated", value:userDoc?.totalGenerations??"—", icon:IC.document, color:"#10B981" },
+    { label:"Credits Balance", value:userDoc?`$${(userDoc.credits||0).toFixed(2)}`:"—", icon:IC.creditCard, color:"#F59E0B" },
+    { label:"History Records", value:history.length||"—", icon:IC.activity, color:"#8B5CF6" },
+  ];
+
+  return (
+    <div style={{ minHeight:"100vh",paddingTop:64,display:"flex" }}>
+      <style>{`
+        .db-sidebar{display:flex!important}
+        .db-mobile-btn{display:none!important}
+        @media(max-width:768px){.db-sidebar{display:none!important}.db-mobile-btn{display:flex!important}}
+      `}</style>
+      <div className="db-sidebar" style={{ position:"sticky",top:64,height:"calc(100vh - 64px)",flexShrink:0 }}>
+        <Sidebar />
+      </div>
+      {sideOpen && <Sidebar mobile />}
+
+      <div style={{ flex:1,padding:"28px 22px",maxWidth:1060,margin:"0 auto",width:"100%" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:24 }}>
+          <button className="db-mobile-btn" onClick={()=>setSideOpen(true)}
+            style={{ background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",
+              borderRadius:8,padding:8,cursor:"pointer",alignItems:"center" }}>
+            <Icon d={IC.menu} size={18} />
+          </button>
+          <h1 style={{ fontFamily:"'Sora',sans-serif",fontSize:20,fontWeight:800,color:"#fff",margin:0 }}>
+            {navItems.find(n=>n.id===tab)?.label}
+          </h1>
+        </div>
+
+        {tab==="home" && (
+          <>
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:14,marginBottom:28 }}>
+              {stats.map(s => (
+                <Glass key={s.label} style={{ padding:18 }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14 }}>
+                    <div style={{ width:36,height:36,borderRadius:10,background:`${s.color}18`,display:"flex",alignItems:"center",justifyContent:"center" }}>
+                      <Icon d={s.icon} size={18} stroke={s.color} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize:24,fontWeight:800,fontFamily:"'Sora',sans-serif",color:"#fff",marginBottom:3 }}>{s.value}</div>
+                  <div style={{ fontSize:12,color:C.dim }}>{s.label}</div>
+                </Glass>
+              ))}
+            </div>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16 }}>
+              <h2 style={{ fontFamily:"'Sora',sans-serif",fontSize:16,fontWeight:700,color:"#fff",margin:0 }}>Recent Templates</h2>
+              <button onClick={()=>setTab("templates")} style={{ background:"none",border:"none",color:C.accent2,fontSize:13,cursor:"pointer" }}>View all →</button>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:14 }}>
+              {allTemplates.slice(0,4).map(t => (
+                <TCard key={t.id} t={t} onSelect={()=>{setSelectedTemplate(t);setPage("template-detail");}} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {tab==="templates" && CATEGORIES.map(cat => (
+          <div key={cat.id} style={{ marginBottom:36 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:14 }}>
+              <div style={{ width:32,height:32,borderRadius:9,background:`${cat.color}18`,display:"flex",alignItems:"center",justifyContent:"center" }}>
+                <Icon d={cat.icon} size={17} stroke={cat.color} />
+              </div>
+              <h3 style={{ fontFamily:"'Sora',sans-serif",fontSize:15,fontWeight:700,color:"#fff",margin:0 }}>{cat.name}</h3>
+              <Badge color={cat.color}>{cat.count}</Badge>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12 }}>
+              {allTemplates.filter(t=>t.catId===cat.id).map(t => (
+                <TCard key={t.id} t={t} onSelect={()=>{setSelectedTemplate(t);setPage("template-detail");}} />
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {tab==="history" && (
+          <div>
+            <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:16 }}>
+              <Btn variant="ghost" onClick={loadHistory} style={{ padding:"8px 16px",fontSize:13 }}>
+                <Icon d={IC.refresh} size={15} /> Refresh
+              </Btn>
+            </div>
+            {loadingHistory ? (
+              <div style={{ textAlign:"center",padding:40 }}><Spinner size={32} /></div>
+            ) : history.length===0 ? (
+              <Glass style={{ padding:40,textAlign:"center" }}>
+                <Icon d={IC.clock} size={44} stroke={C.dim} />
+                <h3 style={{ fontFamily:"'Sora',sans-serif",color:"#fff",marginTop:14,fontSize:17 }}>No history yet</h3>
+                <p style={{ color:"#9CA3AF",fontSize:13 }}>Generated documents will appear here.</p>
+                <Btn variant="primary" onClick={()=>setTab("templates")} style={{ marginTop:14 }}>Browse Templates</Btn>
+              </Glass>
+            ) : (
+              <Glass style={{ padding:0,overflow:"hidden" }}>
+                <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+                      {["Document","Status","Date","Actions"].map(h => (
+                        <th key={h} style={{ padding:"12px 18px",textAlign:"left",fontSize:11,fontWeight:700,color:C.dim,letterSpacing:"0.08em" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map(g => (
+                      <tr key={g.id} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                        <td style={{ padding:"11px 18px",fontSize:13,color:"#fff",fontWeight:500 }}>{g.templateName||"Document"}</td>
+                        <td style={{ padding:"11px 18px" }}><Badge color={g.purchased?"#10B981":"#F59E0B"}>{g.purchased?"Purchased":"Preview"}</Badge></td>
+                        <td style={{ padding:"11px 18px",fontSize:12,color:C.dim }}>
+                          {g.createdAt?.seconds?new Date(g.createdAt.seconds*1000).toLocaleDateString():"—"}
+                        </td>
+                        <td style={{ padding:"11px 18px" }}>
+                          <button onClick={()=>deleteGeneration(g.id)} style={{ background:"none",border:"none",cursor:"pointer",color:"#F87171",display:"flex",alignItems:"center",gap:5,fontSize:12 }}>
+                            <Icon d={IC.trash} size={14} stroke="#F87171" /> Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Glass>
+            )}
+          </div>
+        )}
+
+        {tab==="settings" && (
+          <div style={{ display:"flex",flexDirection:"column",gap:18,maxWidth:520 }}>
+            <Glass style={{ padding:26 }}>
+              <h3 style={{ fontFamily:"'Sora',sans-serif",fontSize:15,fontWeight:700,color:"#fff",margin:"0 0 18px" }}>Profile</h3>
+              <div style={{ display:"flex",flexDirection:"column",gap:13 }}>
+                <Input label="Display Name" value={profileForm.displayName} onChange={e=>setProfileForm(p=>({...p,displayName:e.target.value}))} />
+                <Input label="Email Address" type="email" value={profileForm.email} onChange={e=>setProfileForm(p=>({...p,email:e.target.value}))} />
+                <Btn variant="primary" onClick={saveProfile} disabled={savingProfile} style={{ width:"fit-content" }}>
+                  {savingProfile?<><Spinner size={15}/> Saving…</>:"Save Changes"}
+                </Btn>
+              </div>
+            </Glass>
+            <Glass style={{ padding:26 }}>
+              <h3 style={{ fontFamily:"'Sora',sans-serif",fontSize:15,fontWeight:700,color:"#fff",margin:"0 0 4px" }}>Account Info</h3>
+              <div style={{ display:"flex",flexDirection:"column",gap:10,marginTop:14 }}>
+                {[["UID",authUser?.uid],["Plan",userDoc?.plan||"free"],["Generations",userDoc?.totalGenerations||0],["Credits",`$${(userDoc?.credits||0).toFixed(2)}`]].map(([k,v]) => (
+                  <div key={k} style={{ display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
+                    <span style={{ fontSize:13,color:C.dim }}>{k}</span>
+                    <span style={{ fontSize:k==="UID"?11:13,color:"#fff",fontFamily:k==="UID"?"monospace":undefined }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </Glass>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Template Detail ───────────────────────────────────────────────────────────
+const TemplateDetail = ({ template, setPage, authUser, fb, showToast }) => {
+  const fields = getFields(template);
+  const [formData, setFormData] = useState({});
+  const [imageMap, setImageMap] = useState({}); // fieldId -> dataURL
+  const [generating, setGenerating] = useState(false);
+  const previewRef = React.useRef(null);
+  const [previewH, setPreviewH] = useState(0);
+
+  React.useEffect(() => {
+    if (!previewRef.current) return;
+    const ro = new ResizeObserver(entries => setPreviewH(entries[0].contentRect.height));
+    ro.observe(previewRef.current);
+    return () => ro.disconnect();
+  }, [template?.imageURL]);
+
+  const setField = (id, val) => setFormData(p => ({ ...p, [id]: val }));
+  const setFieldImage = async (id, file) => {
+    if (!file) return;
+    const dataURL = await fileToDataURL(file);
+    setImageMap(p => ({ ...p, [id]: dataURL }));
+  };
+
+  const generate = async () => {
+    setGenerating(true);
+    try {
+      let renderedURL = null;
+      if (template?.imageURL) {
+        renderedURL = await renderToCanvas(template, formData, imageMap);
+      }
+      const docRef = await fb.addDoc(fb.collection(fb.db,"generations"), {
+        userId:authUser.uid, templateId:template.id, templateName:template.name,
+        templateCategory:template.category, formData:{...formData},
+        renderedURL: renderedURL && renderedURL.length < 900000 ? renderedURL : null,
+        purchased:false, createdAt:fb.serverTimestamp(),
+      });
+      const uSnap = await fb.getDoc(fb.doc(fb.db,"users",authUser.uid));
+      await fb.setDoc(fb.doc(fb.db,"users",authUser.uid),
+        { totalGenerations:(uSnap.data()?.totalGenerations||0)+1 },{ merge:true }
+      );
+      if (renderedURL) sessionStorage.setItem("proofit_last_rendered", renderedURL);
+      else sessionStorage.removeItem("proofit_last_rendered");
+      showToast("Document generated!");
+      setTimeout(() => setPage("generated"), 600);
+    } catch (e) { showToast("Generation failed: "+e.message,"error"); }
+    setGenerating(false);
+  };
+
+  const isImageType = (t) => t==="photo" || t==="signature" || t==="image";
+
+  return (
+    <div style={{ minHeight:"100vh",paddingTop:80,padding:"80px 24px 60px" }}>
+      <div style={{ maxWidth:1060,margin:"0 auto" }}>
+        <button onClick={()=>setPage("dashboard")} style={{ background:"none",border:"none",color:"#9CA3AF",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",gap:6,marginBottom:24 }}>
+          ← Back to Templates
+        </button>
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,alignItems:"start" }} className="td-grid">
+          <style>{`@media(max-width:768px){.td-grid{grid-template-columns:1fr!important}}`}</style>
+
+          <Glass style={{ padding:18,position:"sticky",top:84 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+              <h2 style={{ fontFamily:"'Sora',sans-serif",fontSize:16,fontWeight:800,color:"#fff",margin:0 }}>{template?.name}</h2>
+              <Badge color={template?.color||C.accent2}>{template?.category}</Badge>
+            </div>
+            {template?.imageURL ? (
+              <div ref={previewRef} style={{ position:"relative",width:"100%",borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)" }}>
+                <img src={template.imageURL} alt={template.name} style={{ width:"100%",display:"block" }} />
+                {fields.map(f => {
+                  const left = (f.x||0)*100, top = (f.y||0)*100, w = (f.w||0.2)*100, h = (f.h||0.04)*100;
+                  const value = formData[f.id];
+                  const imgSrc = imageMap[f.id];
+                  const px = Math.max(8, (f.fontSize||0.025) * previewH);
+                  return (
+                    <div key={f.id} style={{ position:"absolute", left:left+"%", top:top+"%", width:w+"%", height:h+"%", display:"flex", alignItems:"flex-start", justifyContent: f.align==="center"?"center":f.align==="right"?"flex-end":"flex-start", overflow:"hidden", color:f.fontColor||"#111", fontWeight:f.fontWeight||600, lineHeight:1.1, pointerEvents:"none" }}>
+                      {isImageType(f.type) ? (
+                        imgSrc ? <img src={imgSrc} style={{ width:"100%", height:"100%", objectFit:"contain" }}/> :
+                        <div style={{ width:"100%",height:"100%",border:"1px dashed rgba(0,0,0,0.25)",background:"rgba(255,255,255,0.25)" }} />
+                      ) : (
+                        <span style={{ fontFamily:"'Sora',sans-serif", fontSize:px+"px", whiteSpace:"nowrap" }}>{value||""}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ background:`linear-gradient(135deg,${template?.color||"#3B82F6"}10,${template?.color||"#3B82F6"}04)`, border:`1px solid ${template?.color||"#3B82F6"}22`,borderRadius:12,padding:24,minHeight:260,position:"relative",overflow:"hidden" }}>
+                <div style={{ fontSize:10,fontWeight:700,color:template?.color||C.accent2,letterSpacing:"0.14em",marginBottom:10 }}>{template?.name?.toUpperCase()}</div>
+                <div style={{ fontSize:12,color:C.dim }}>No template image uploaded yet. Admin can upload one in the Admin Panel to enable visual rendering.</div>
+              </div>
+            )}
+          </Glass>
+
+          <Glass style={{ padding:24 }}>
+            <h2 style={{ fontFamily:"'Sora',sans-serif",fontSize:16,fontWeight:800,color:"#fff",margin:"0 0 18px" }}>Document Details</h2>
+            <div style={{ display:"flex",flexDirection:"column",gap:13 }}>
+              {fields.length===0 && <p style={{ fontSize:12,color:C.dim }}>This template has no input fields configured.</p>}
+              {fields.map(field => (
+                <div key={field.id}>
+                  {(field.type==="text"||field.type==="date") && (
+                    <Input label={field.label} type={field.type} placeholder={field.placeholder}
+                      value={formData[field.id]||""} onChange={e=>setField(field.id,e.target.value)} />
+                  )}
+                  {field.type==="textarea" && (
+                    <label style={{ display:"flex",flexDirection:"column",gap:7 }}>
+                      <span style={{ fontSize:12,fontWeight:600,color:C.muted }}>{field.label}</span>
+                      <textarea rows={3} value={formData[field.id]||""} onChange={e=>setField(field.id,e.target.value)} style={{ ...iStyle, fontFamily:"inherit", resize:"vertical" }} />
+                    </label>
+                  )}
+                  {field.type==="select" && (
+                    <Input label={field.label} type="select" options={field.options||[]} value={formData[field.id]||""} onChange={e=>setField(field.id,e.target.value)} />
+                  )}
+                  {isImageType(field.type) && (
+                    <div>
+                      <div style={{ fontSize:12,fontWeight:600,color:C.muted,marginBottom:7 }}>{field.label}</div>
+                      <label style={{ display:"flex",alignItems:"center",gap:10,background:"rgba(255,255,255,0.03)",border:"1px dashed rgba(255,255,255,0.12)",borderRadius:9,padding:"10px",cursor:"pointer" }}>
+                        <div style={{ width:48,height:48,borderRadius:6,background:"rgba(255,255,255,0.04)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0 }}>
+                          {imageMap[field.id] ? <img src={imageMap[field.id]} style={{ width:"100%",height:"100%",objectFit:"cover" }}/> : <Icon d={field.type==="signature"?IC.zap:IC.camera} size={18} stroke={C.dim}/>}
+                        </div>
+                        <div style={{ flex:1,fontSize:12,color:C.dim }}>{imageMap[field.id]?"Image selected — click to replace":"Click to upload image"}</div>
+                        <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>setFieldImage(field.id, e.target.files[0])}/>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <Btn variant="primary" onClick={generate} disabled={generating}
+                style={{ marginTop:10,justifyContent:"center",padding:"13px 22px",fontSize:15 }}>
+                {generating?<><Spinner size={17}/> Generating…</>:<><Icon d={IC.zap} size={18}/> Generate Document</>}
+              </Btn>
+            </div>
+          </Glass>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Generated Preview ─────────────────────────────────────────────────────────
+const GeneratedPreview = ({ template, setPage, authUser, fb, showToast }) => {
+  const [purchased, setPurchased] = useState(false);
+  const [purchasing, setPurchasing] = useState(false);
+  const [latestGen, setLatestGen] = useState(null);
+  const rendered = latestGen?.renderedURL || (typeof sessionStorage!=="undefined" ? sessionStorage.getItem("proofit_last_rendered") : null);
+
+  useEffect(() => {
+    (async () => {
+      if (!template || !authUser) return;
+      try {
+        const q = fb.query(fb.collection(fb.db,"generations"),fb.where("userId","==",authUser.uid),fb.where("templateId","==",template.id));
+        const snap = await fb.getDocs(q);
+        const latest = snap.docs.sort((a,b)=>(b.data().createdAt?.seconds||0)-(a.data().createdAt?.seconds||0))[0];
+        if (latest) { setLatestGen({ id:latest.id, ...latest.data() }); setPurchased(!!latest.data().purchased); }
+      } catch {}
+    })();
+  }, [template, authUser]);
+
+  const purchase = async () => {
+    setPurchasing(true);
+    try {
+      if (latestGen) await fb.updateDoc(fb.doc(fb.db,"generations",latestGen.id),{ purchased:true });
+      await fb.setDoc(fb.doc(fb.db,"users",authUser.uid),{ credits:-4.99 },{ merge:true });
+      showToast("Purchase complete! Download unlocked.");
+      setPurchased(true);
+    } catch { showToast("Purchase failed. Try again.","error"); }
+    setPurchasing(false);
+  };
+
+  const download = () => {
+    if (!rendered) return;
+    const a = document.createElement("a");
+    a.href = rendered;
+    a.download = (template?.name||"document").replace(/\s+/g,"_") + ".png";
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
+  return (
+    <div style={{ minHeight:"100vh",paddingTop:80,padding:"80px 24px 60px" }}>
+      <div style={{ maxWidth:780,margin:"0 auto" }}>
+        <button onClick={()=>setPage("template-detail")} style={{ background:"none",border:"none",color:"#9CA3AF",fontSize:13,cursor:"pointer",marginBottom:22 }}>← Back to Editor</button>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+          <h1 style={{ fontFamily:"'Sora',sans-serif",fontSize:20,fontWeight:800,color:"#fff",margin:0 }}>Document Preview</h1>
+          <Badge color="#10B981">Generated ✓</Badge>
+        </div>
+        {!purchased && (
+          <Glass style={{ padding:14,marginBottom:18,border:"1px solid rgba(245,158,11,0.22)",background:"rgba(245,158,11,0.05)" }}>
+            <div style={{ display:"flex",gap:11,alignItems:"center" }}>
+              <Icon d={IC.lock} size={19} stroke="#F59E0B"/>
+              <div>
+                <div style={{ fontSize:13,fontWeight:700,color:"#FBBF24" }}>Preview Only — Purchase to Download</div>
+                <div style={{ fontSize:12,color:"#9CA3AF" }}>Watermark applied. Purchase to receive the clean version.</div>
+              </div>
+            </div>
+          </Glass>
+        )}
+        <Glass style={{ padding:0,overflow:"hidden",marginBottom:22 }}>
+          {rendered ? (
+            <div style={{ position:"relative" }}>
+              <img src={rendered} alt="Generated" style={{ width:"100%",display:"block" }} />
+              {!purchased && (
+                <div style={{ position:"absolute",inset:0,pointerEvents:"none",overflow:"hidden" }}>
+                  {Array.from({length:24}).map((_,i)=>(
+                    <div key={i} style={{ position:"absolute",fontSize:18,fontWeight:900,color:"rgba(0,0,0,0.22)",
+                      textShadow:"0 0 6px rgba(255,255,255,0.5)",
+                      letterSpacing:"0.2em",whiteSpace:"nowrap",transform:"rotate(-30deg)",
+                      left:`${(i%4)*28-8}%`,top:`${Math.floor(i/4)*22-5}%` }}>★ PREVIEW ONLY ★</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ padding:36,minHeight:280,color:C.dim,textAlign:"center" }}>
+              <div style={{ fontSize:13 }}>No rendered preview available. This template has no uploaded reference image — admin can upload one in the Admin Panel.</div>
+            </div>
+          )}
+        </Glass>
+        <div style={{ display:"flex",gap:10 }}>
+          {!purchased ? (
+            <Btn variant="success" onClick={purchase} disabled={purchasing} style={{ flex:1,justifyContent:"center",padding:"13px 22px",fontSize:14 }}>
+              {purchasing?<><Spinner size={16}/> Processing…</>:<><Icon d={IC.download} size={17}/> Purchase Download — $4.99</>}
+            </Btn>
+          ) : (
+            <Btn variant="success" onClick={download} style={{ flex:1,justifyContent:"center",padding:"13px 22px",fontSize:14 }}>
+              <Icon d={IC.download} size={17}/> Download Document
+            </Btn>
+          )}
+          <Btn variant="ghost" onClick={()=>setPage("template-detail")} style={{ padding:"13px 18px" }}>Generate Again</Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Admin Panel ───────────────────────────────────────────────────────────────
+const AdminPanel = ({ setPage, fb, showToast, authUser, customTemplates, reloadTemplates }) => {
+  const [section, setSection] = useState("overview");
+  const [users, setUsers] = useState([]);
+  const [gens, setGens] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [editor, setEditor] = useState(null);
+  const [aiKey, setAiKey] = useState(typeof localStorage!=="undefined" ? (localStorage.getItem("proofit_gemini_key")||"") : "");
+  const [detecting, setDetecting] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const loadData = useCallback(async () => {
+    if (!fb) return;
+    setLoading(true);
+    try {
+      const [uSnap, gSnap] = await Promise.all([
+        fb.getDocs(fb.collection(fb.db,"users")),
+        fb.getDocs(fb.collection(fb.db,"generations")),
+      ]);
+      setUsers(uSnap.docs.map(d => ({ id:d.id,...d.data() })));
+      setGens(gSnap.docs.map(d => ({ id:d.id,...d.data() })));
+    } catch (e) { showToast("Failed to load data: "+e.message,"error"); }
+    setLoading(false);
+  }, [fb]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const adminNav = [
+    { id:"overview", icon:IC.activity, label:"Overview" },
+    { id:"templates", icon:IC.layers, label:"Templates" },
+    { id:"add", icon:IC.upload, label:"Add / Edit" },
+    { id:"users", icon:IC.user, label:"Users" },
+    { id:"orders", icon:IC.creditCard, label:"Orders" },
+    { id:"settings", icon:IC.settings, label:"AI Key" },
+  ];
+
+  const purchased = gens.filter(g => g.purchased);
+  const revenue = purchased.length * 4.99;
+
+  const customById = Object.fromEntries((customTemplates||[]).map(t => [t.id, t]));
+  const allRows = [
+    ...ALL_TEMPLATES.map(t => ({ ...t, custom:customById[t.id], effectiveFields:getFields(customById[t.id]||t) })),
+    ...(customTemplates||[]).filter(t => !ALL_TEMPLATES.find(b => b.id === t.id)).map(t => ({ ...t, custom:t, effectiveFields:getFields(t) })),
+  ];
+
+  const startEdit = (row) => {
+    const c = row.custom;
+    setEditor({
+      id: c?.id || row.id,
+      docId: c?._docId || null,
+      baseId: ALL_TEMPLATES.find(b=>b.id===row.id) ? row.id : null,
+      name: row.name,
+      category: row.category,
+      color: row.color,
+      catId: row.catId,
+      imageURL: c?.imageURL || "",
+      fields: getFields(c||row),
+    });
+    setSection("add");
+  };
+
+  const startNew = () => {
+    setEditor({
+      id: "custom_"+Date.now().toString(36),
+      docId: null, baseId: null, name: "",
+      category: CATEGORIES[0].name, catId: CATEGORIES[0].id, color: CATEGORIES[0].color,
+      imageURL: "", fields: [],
+    });
+    setSection("add");
+  };
+
+  const onPickImage = async (file) => {
+    if (!file) return;
+    const dataURL = await fileToDataURL(file);
+    setEditor(e => ({ ...e, imageURL: dataURL, _imgFile: file }));
+  };
+
+  const detect = async () => {
+    if (!editor?.imageURL) return showToast("Upload a template image first.","warning");
+    setDetecting(true);
+    try {
+      const fields = await aiDetectFields(editor.imageURL);
+      setEditor(e => ({ ...e, fields }));
+      showToast(`Detected ${fields.length} field(s).`);
+    } catch (e) { showToast(e.message,"error"); }
+    setDetecting(false);
+  };
+
+  const updateField = (i, patch) => setEditor(e => ({ ...e, fields: e.fields.map((f,j)=> j===i?{...f,...patch}:f) }));
+  const removeField = (i) => setEditor(e => ({ ...e, fields: e.fields.filter((_,j)=>j!==i) }));
+  const addField = () => setEditor(e => ({ ...e, fields: [...e.fields, { id:slugify("field "+(e.fields.length+1)), label:"New Field", type:"text", x:0.1, y:0.1, w:0.3, h:0.04, fontSize:0.025, fontColor:"#111111", align:"left" }] }));
+
+  const saveTemplate = async () => {
+    if (!editor) return;
+    if (!editor.name) return showToast("Name required.","warning");
+    if (!editor.imageURL) return showToast("Image required.","warning");
+    setSaving(true);
+    try {
+      let imageURL = editor.imageURL;
+      if (editor._imgFile && fb.storage) {
+        try {
+          const ref = fb.ref(fb.storage, `templates/${editor.id}_${Date.now()}_${editor._imgFile.name}`);
+          await fb.uploadBytes(ref, editor._imgFile);
+          imageURL = await fb.getDownloadURL(ref);
+        } catch (err) { /* fall back to dataURL */ }
+      }
+      const payload = {
+        id: editor.id, name: editor.name, category: editor.category, catId: editor.catId,
+        color: editor.color, baseId: editor.baseId || null, imageURL,
+        fields: editor.fields, updatedAt: fb.serverTimestamp(), createdBy: authUser.uid,
+      };
+      if (editor.docId) {
+        await fb.updateDoc(fb.doc(fb.db,"customTemplates",editor.docId), payload);
+      } else {
+        await fb.addDoc(fb.collection(fb.db,"customTemplates"), { ...payload, createdAt: fb.serverTimestamp() });
+      }
+      showToast("Template saved.");
+      await reloadTemplates();
+      setSection("templates");
+      setEditor(null);
+    } catch (e) { showToast("Save failed: "+e.message,"error"); }
+    setSaving(false);
+  };
+
+  const deleteCustom = async (docId) => {
+    if (!docId) return;
+    if (!window.confirm("Delete this custom template?")) return;
+    try {
+      await fb.deleteDoc(fb.doc(fb.db,"customTemplates",docId));
+      await reloadTemplates();
+      showToast("Deleted.");
+    } catch (e) { showToast("Delete failed.","error"); }
+  };
+
+  const saveKey = () => { localStorage.setItem("proofit_gemini_key", aiKey.trim()); showToast("AI key saved."); };
+
+  return (
+    <div style={{ minHeight:"100vh",paddingTop:64,display:"flex" }}>
+      <div style={{ width:200,background:"rgba(17,24,39,0.85)",borderRight:"1px solid rgba(255,255,255,0.06)",padding:"22px 12px",backdropFilter:"blur(20px)",flexShrink:0 }}>
+        <div style={{ padding:"6px 10px",marginBottom:12 }}><Badge color="#EF4444">ADMIN</Badge></div>
+        {adminNav.map(item => (
+          <button key={item.id} onClick={()=>setSection(item.id)}
+            style={{ display:"flex",alignItems:"center",gap:9,padding:"9px 11px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:500,background:section===item.id?"rgba(239,68,68,0.15)":"transparent",color:section===item.id?"#F87171":"#9CA3AF",width:"100%",transition:"all 0.2s",fontFamily:"inherit" }}>
+            <Icon d={item.icon} size={16} stroke="currentColor"/> {item.label}
+          </button>
+        ))}
+        <div style={{ marginTop:16,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+          <button onClick={()=>setPage("dashboard")} style={{ display:"flex",alignItems:"center",gap:9,padding:"9px 11px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,color:C.dim,background:"transparent",fontFamily:"inherit",width:"100%" }}>← User View</button>
+        </div>
+      </div>
+      <div style={{ flex:1,padding:"28px 24px",overflow:"auto" }}>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24,flexWrap:"wrap",gap:10 }}>
+          <h1 style={{ fontFamily:"'Sora',sans-serif",fontSize:20,fontWeight:800,color:"#fff",margin:0 }}>{adminNav.find(n=>n.id===section)?.label}</h1>
+          <div style={{ display:"flex",gap:8 }}>
+            {section==="templates" && <Btn variant="primary" onClick={startNew} style={{ padding:"7px 14px",fontSize:12 }}><Icon d={IC.upload} size={14}/> New Template</Btn>}
+            <Btn variant="ghost" onClick={loadData} style={{ padding:"7px 14px",fontSize:12 }}><Icon d={IC.refresh} size={14}/> Refresh</Btn>
+          </div>
+        </div>
+
+        {loading && <div style={{ textAlign:"center",padding:40 }}><Spinner size={32}/></div>}
+
+        {!loading && section==="overview" && (
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:14 }}>
+            {[
+              {label:"Total Users",value:users.length,color:"#3B82F6"},
+              {label:"Templates",value:allRows.length,color:"#10B981"},
+              {label:"Custom Templates",value:(customTemplates||[]).length,color:"#06B6D4"},
+              {label:"All Generations",value:gens.length,color:"#F59E0B"},
+              {label:"Purchased",value:purchased.length,color:"#8B5CF6"},
+              {label:"Revenue",value:`$${revenue.toFixed(2)}`,color:"#EC4899"},
+            ].map(s=>(
+              <Glass key={s.label} style={{ padding:18 }}>
+                <div style={{ fontSize:26,fontWeight:900,fontFamily:"'Sora',sans-serif",color:s.color,marginBottom:5 }}>{s.value}</div>
+                <div style={{ fontSize:12,color:C.dim }}>{s.label}</div>
+              </Glass>
+            ))}
+          </div>
+        )}
+
+        {!loading && section==="templates" && (
+          <Glass style={{ padding:0,overflow:"auto" }}>
+            <table style={{ width:"100%",borderCollapse:"collapse",minWidth:720 }}>
+              <thead><tr style={{ borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+                {["Template","Category","Image","Fields","Type","Actions"].map(h=>(
+                  <th key={h} style={{ padding:"12px 16px",textAlign:"left",fontSize:11,fontWeight:700,color:C.dim,letterSpacing:"0.08em" }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>{allRows.map(t=>(
+                <tr key={t.id} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                  <td style={{ padding:"11px 16px",fontSize:13,color:"#fff",fontWeight:500 }}>{t.name}</td>
+                  <td style={{ padding:"11px 16px" }}><Badge color={t.color}>{t.category}</Badge></td>
+                  <td style={{ padding:"11px 16px" }}>{t.custom?.imageURL ? <img src={t.custom.imageURL} style={{ width:50,height:34,objectFit:"cover",borderRadius:4 }}/> : <span style={{ fontSize:11,color:C.dim }}>—</span>}</td>
+                  <td style={{ padding:"11px 16px",fontSize:12,color:C.dim }}>{t.effectiveFields.length}</td>
+                  <td style={{ padding:"11px 16px" }}><Badge color={t.custom?"#06B6D4":"#10B981"}>{t.custom?"Custom":"Built-in"}</Badge></td>
+                  <td style={{ padding:"11px 16px" }}>
+                    <div style={{ display:"flex",gap:6 }}>
+                      <button onClick={()=>startEdit(t)} style={{ background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"5px 9px",cursor:"pointer",color:"#60A5FA",fontSize:11,fontFamily:"inherit" }}>Edit</button>
+                      {t.custom?._docId && (
+                        <button onClick={()=>deleteCustom(t.custom._docId)} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:6,padding:"5px 9px",cursor:"pointer",color:"#F87171",fontSize:11,fontFamily:"inherit" }}>Delete</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </Glass>
+        )}
+
+        {!loading && section==="add" && (
+          editor ? <TemplateEditor editor={editor} setEditor={setEditor} onPickImage={onPickImage} detect={detect} detecting={detecting} updateField={updateField} removeField={removeField} addField={addField} saveTemplate={saveTemplate} saving={saving} />
+            : (
+              <Glass style={{ padding:32,textAlign:"center" }}>
+                <p style={{ color:C.dim,fontSize:14,marginBottom:14 }}>Pick a template from "Templates" to edit, or start a new one.</p>
+                <Btn variant="primary" onClick={startNew}>+ New Template</Btn>
+              </Glass>
+            )
+        )}
+
+        {!loading && section==="settings" && (
+          <Glass style={{ padding:24,maxWidth:520 }}>
+            <h3 style={{ fontFamily:"'Sora',sans-serif",fontSize:15,fontWeight:700,color:"#fff",margin:"0 0 6px" }}>Gemini API Key</h3>
+            <p style={{ fontSize:12,color:C.dim,marginBottom:14 }}>Used to auto-detect input fields from uploaded template images. Stored locally in this browser only.</p>
+            <Input label="API Key" type="text" value={aiKey} onChange={e=>setAiKey(e.target.value)} placeholder="AIza…" />
+            <Btn variant="primary" onClick={saveKey} style={{ marginTop:12 }}>Save Key</Btn>
+            <p style={{ fontSize:11,color:C.dim,marginTop:14 }}>Get a free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style={{ color:C.accent2 }}>aistudio.google.com/app/apikey</a></p>
+          </Glass>
+        )}
+
+        {!loading && section==="users" && (
+          users.length===0 ? (
+            <Glass style={{ padding:32,textAlign:"center" }}><p style={{ color:C.dim,fontSize:14 }}>No users in Firestore yet.</p></Glass>
+          ) : (
+            <Glass style={{ padding:0,overflow:"auto" }}>
+              <table style={{ width:"100%",borderCollapse:"collapse",minWidth:640 }}>
+                <thead><tr style={{ borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+                  {["Name","Email","Plan","Generations","Joined"].map(h=>(
+                    <th key={h} style={{ padding:"12px 16px",textAlign:"left",fontSize:11,fontWeight:700,color:C.dim,letterSpacing:"0.08em" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>{users.map(u=>(
+                  <tr key={u.id} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                    <td style={{ padding:"11px 16px",fontSize:13,color:"#fff" }}>{u.displayName||"—"}</td>
+                    <td style={{ padding:"11px 16px",fontSize:12,color:C.dim }}>{u.email}</td>
+                    <td style={{ padding:"11px 16px" }}><Badge color={C.accent2}>{u.plan||"free"}</Badge></td>
+                    <td style={{ padding:"11px 16px",fontSize:13,color:"#fff" }}>{u.totalGenerations||0}</td>
+                    <td style={{ padding:"11px 16px",fontSize:12,color:C.dim }}>{u.createdAt?.seconds?new Date(u.createdAt.seconds*1000).toLocaleDateString():"—"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </Glass>
+          )
+        )}
+
+        {!loading && section==="orders" && (
+          gens.length===0 ? (
+            <Glass style={{ padding:32,textAlign:"center" }}><p style={{ color:C.dim,fontSize:14 }}>No orders yet.</p></Glass>
+          ) : (
+            <Glass style={{ padding:0,overflow:"auto" }}>
+              <table style={{ width:"100%",borderCollapse:"collapse",minWidth:640 }}>
+                <thead><tr style={{ borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+                  {["Document","User ID","Status","Date"].map(h=>(
+                    <th key={h} style={{ padding:"12px 16px",textAlign:"left",fontSize:11,fontWeight:700,color:C.dim,letterSpacing:"0.08em" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>{gens.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)).map(g=>(
+                  <tr key={g.id} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                    <td style={{ padding:"11px 16px",fontSize:13,color:"#fff" }}>{g.templateName||"—"}</td>
+                    <td style={{ padding:"11px 16px",fontSize:11,color:C.dim,fontFamily:"monospace" }}>{g.userId?.slice(0,12)}…</td>
+                    <td style={{ padding:"11px 16px" }}><Badge color={g.purchased?"#10B981":"#F59E0B"}>{g.purchased?"Purchased":"Preview"}</Badge></td>
+                    <td style={{ padding:"11px 16px",fontSize:12,color:C.dim }}>{g.createdAt?.seconds?new Date(g.createdAt.seconds*1000).toLocaleDateString():"—"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </Glass>
+          )
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Visual editor for a template: image + draggable field boxes + field list panel.
+const TemplateEditor = ({ editor, setEditor, onPickImage, detect, detecting, updateField, removeField, addField, saveTemplate, saving }) => {
+  const wrapRef = React.useRef(null);
+  const [dragging, setDragging] = React.useState(null);
+
+  const onMouseDown = (e, i, mode) => {
+    e.preventDefault(); e.stopPropagation();
+    const rect = wrapRef.current.getBoundingClientRect();
+    setDragging({ i, mode, startX:e.clientX, startY:e.clientY, rect, orig:{...editor.fields[i]} });
+  };
+  React.useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e) => {
+      const dx = (e.clientX - dragging.startX) / dragging.rect.width;
+      const dy = (e.clientY - dragging.startY) / dragging.rect.height;
+      if (dragging.mode === "move") {
+        updateField(dragging.i, {
+          x: Math.max(0, Math.min(1-dragging.orig.w, dragging.orig.x + dx)),
+          y: Math.max(0, Math.min(1-dragging.orig.h, dragging.orig.y + dy)),
+        });
+      } else {
+        updateField(dragging.i, {
+          w: Math.max(0.02, Math.min(1-dragging.orig.x, dragging.orig.w + dx)),
+          h: Math.max(0.01, Math.min(1-dragging.orig.y, dragging.orig.h + dy)),
+        });
+      }
+    };
+    const onUp = () => setDragging(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, [dragging]);
+
+  return (
+    <div style={{ display:"grid",gridTemplateColumns:"1.2fr 1fr",gap:18 }} className="tpl-grid">
+      <style>{`@media(max-width:900px){.tpl-grid{grid-template-columns:1fr!important}}`}</style>
+      <Glass style={{ padding:18 }}>
+        <div style={{ display:"flex",gap:8,marginBottom:14,flexWrap:"wrap" }}>
+          <label style={{ flex:1,minWidth:160,background:"rgba(255,255,255,0.04)",border:"1px dashed rgba(255,255,255,0.13)",borderRadius:9,padding:"10px",cursor:"pointer",textAlign:"center",fontSize:12,color:C.muted }}>
+            <Icon d={IC.upload} size={14} stroke={C.accent2}/> {editor.imageURL?"Replace image":"Upload template image"}
+            <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>onPickImage(e.target.files[0])}/>
+          </label>
+          <Btn variant="primary" onClick={detect} disabled={detecting||!editor.imageURL} style={{ padding:"10px 14px",fontSize:12 }}>
+            {detecting?<><Spinner size={14}/> Detecting…</>:<><Icon d={IC.zap} size={14}/> Auto-detect fields</>}
+          </Btn>
+        </div>
+        {editor.imageURL ? (
+          <div ref={wrapRef} style={{ position:"relative",width:"100%",borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)",userSelect:"none" }}>
+            <img src={editor.imageURL} alt="template" style={{ width:"100%",display:"block",pointerEvents:"none" }} draggable={false}/>
+            {editor.fields.map((f,i) => (
+              <div key={i} onMouseDown={(e)=>onMouseDown(e,i,"move")}
+                style={{ position:"absolute", left:(f.x*100)+"%", top:(f.y*100)+"%", width:(f.w*100)+"%", height:(f.h*100)+"%", border:"2px solid #3B82F6", background:"rgba(59,130,246,0.15)", cursor:"move", boxSizing:"border-box" }}>
+                <div style={{ position:"absolute", top:-18, left:0, fontSize:10, background:"#3B82F6", color:"#fff", padding:"1px 5px", borderRadius:3, whiteSpace:"nowrap" }}>{f.label}</div>
+                <div onMouseDown={(e)=>onMouseDown(e,i,"resize")} style={{ position:"absolute", right:-5, bottom:-5, width:12, height:12, background:"#3B82F6", borderRadius:2, cursor:"nwse-resize" }}/>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding:40,textAlign:"center",color:C.dim,fontSize:13,border:"1px dashed rgba(255,255,255,0.1)",borderRadius:10 }}>Upload an image to begin.</div>
+        )}
+      </Glass>
+
+      <Glass style={{ padding:18,maxHeight:"75vh",overflow:"auto" }}>
+        <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:14 }}>
+          <Input label="Template Name" value={editor.name} onChange={e=>setEditor(s=>({...s,name:e.target.value}))} placeholder="e.g. California Driver's License"/>
+          <label style={{ display:"flex",flexDirection:"column",gap:7 }}>
+            <span style={{ fontSize:12,fontWeight:600,color:C.muted }}>Category</span>
+            <select value={editor.catId} onChange={e=>{ const c=CATEGORIES.find(x=>x.id===e.target.value); setEditor(s=>({...s, catId:c.id, category:c.name, color:c.color })); }} style={iStyle}>
+              {CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+          <h4 style={{ fontFamily:"'Sora',sans-serif",fontSize:13,fontWeight:700,color:"#fff",margin:0 }}>Fields ({editor.fields.length})</h4>
+          <Btn variant="ghost" onClick={addField} style={{ padding:"5px 10px",fontSize:11 }}>+ Add</Btn>
+        </div>
+        <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+          {editor.fields.map((f,i)=>(
+            <div key={i} style={{ background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:8,padding:10 }}>
+              <div style={{ display:"flex",gap:6,marginBottom:6 }}>
+                <input value={f.label} onChange={e=>updateField(i,{label:e.target.value, id:slugify(e.target.value)})} placeholder="Label" style={{ ...iStyle, padding:"6px 8px", fontSize:12, flex:1 }}/>
+                <select value={f.type} onChange={e=>updateField(i,{type:e.target.value})} style={{ ...iStyle, padding:"6px 8px", fontSize:12, width:100 }}>
+                  {["text","date","select","textarea","photo","signature"].map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+                <button onClick={()=>removeField(i)} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.25)",borderRadius:6,padding:"6px 9px",cursor:"pointer",color:"#F87171",fontSize:12 }}>×</button>
+              </div>
+              {f.type==="select" && (
+                <input value={(f.options||[]).join(", ")} onChange={e=>updateField(i,{options:e.target.value.split(",").map(s=>s.trim()).filter(Boolean)})} placeholder="Option1, Option2, ..." style={{ ...iStyle, padding:"6px 8px", fontSize:12, marginBottom:6 }}/>
+              )}
+              <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:5 }}>
+                {["x","y","w","h"].map(k=>(
+                  <label key={k} style={{ fontSize:10,color:C.dim,display:"block" }}>{k}
+                    <input type="number" step="0.01" min="0" max="1" value={(f[k]||0).toFixed(3)} onChange={e=>updateField(i,{[k]:+e.target.value})} style={{ ...iStyle, padding:"4px 6px", fontSize:11 }}/>
+                  </label>
+                ))}
+              </div>
+              {!["photo","signature","image"].includes(f.type) && (
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5 }}>
+                  <label style={{ fontSize:10,color:C.dim,display:"block" }}>Size
+                    <input type="number" step="0.001" min="0.005" max="0.2" value={(f.fontSize||0.025).toFixed(3)} onChange={e=>updateField(i,{fontSize:+e.target.value})} style={{ ...iStyle, padding:"4px 6px", fontSize:11 }}/>
+                  </label>
+                  <label style={{ fontSize:10,color:C.dim,display:"block" }}>Color
+                    <input type="color" value={f.fontColor||"#111111"} onChange={e=>updateField(i,{fontColor:e.target.value})} style={{ width:"100%", height:26, padding:0, border:"1px solid rgba(255,255,255,0.1)", borderRadius:4, background:"transparent" }}/>
+                  </label>
+                  <label style={{ fontSize:10,color:C.dim,display:"block" }}>Align
+                    <select value={f.align||"left"} onChange={e=>updateField(i,{align:e.target.value})} style={{ ...iStyle, padding:"4px 6px", fontSize:11 }}>
+                      {["left","center","right"].map(a=><option key={a} value={a}>{a}</option>)}
+                    </select>
+                  </label>
+                </div>
+              )}
+            </div>
+          ))}
+          {!editor.fields.length && <p style={{ fontSize:12,color:C.dim,textAlign:"center",padding:14 }}>No fields yet. Click "Auto-detect" or "+ Add".</p>}
+        </div>
+        <Btn variant="success" onClick={saveTemplate} disabled={saving} style={{ marginTop:14,width:"100%",justifyContent:"center" }}>
+          {saving?<><Spinner size={15}/> Saving…</>:<><Icon d={IC.check} size={15}/> Save Template</>}
+        </Btn>
+      </Glass>
+    </div>
+  );
+};
+
+// ─── Root App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [fb, setFb] = useState(null);
+  const [fbReady, setFbReady] = useState(false);
+  const [fbError, setFbError] = useState(null);
+  const [authUser, setAuthUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [page, setPage] = useState("landing");
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [customTemplates, setCustomTemplates] = useState([]);
+
+  useEffect(() => {
+    loadFirebase(FIREBASE_CONFIG).then(instance => {
+      setFb(instance); setFbReady(true);
+      instance.onAuthStateChanged(u => { setAuthUser(u); setAuthLoading(false); });
+    }).catch(e => { setFbError(e.message || "Unknown error"); setAuthLoading(false); });
+  }, []);
+
+  const reloadTemplates = useCallback(async () => {
+    if (!fb) return;
+    try {
+      const snap = await fb.getDocs(fb.collection(fb.db,"customTemplates"));
+      setCustomTemplates(snap.docs.map(d => ({ ...d.data(), _docId: d.id })));
+    } catch (e) { console.warn("Load templates failed", e); }
+  }, [fb]);
+
+  useEffect(() => { if (fbReady) reloadTemplates(); }, [fbReady, reloadTemplates]);
+
+  // Built-in templates overridden by any custom row with matching id, plus brand-new custom rows.
+  const mergedTemplates = (() => {
+    const customById = Object.fromEntries(customTemplates.map(t => [t.id, t]));
+    const overridden = ALL_TEMPLATES.map(t => customById[t.id] ? { ...t, ...customById[t.id] } : t);
+    const newOnes = customTemplates.filter(t => !ALL_TEMPLATES.find(b => b.id === t.id));
+    return [...overridden, ...newOnes];
+  })();
+
+  const showToast = (msg, type="success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const logout = async () => {
+    await fb?.logout();
+    setAuthUser(null); setPage("landing");
+    showToast("Signed out.", "warning");
+  };
+
+  const isAdmin = !!(authUser?.email && authUser.email.toLowerCase() === ADMIN_EMAIL);
+
+  const navSetPage = (p) => {
+    if ((p==="dashboard"||p==="template-detail"||p==="generated") && !authUser) { setPage("login"); return; }
+    if (p==="admin" && !isAdmin) { showToast("Access denied. Admin only.","error"); return; }
+    setPage(p);
+  };
+
+  const liveTemplate = selectedTemplate ? (mergedTemplates.find(t => t.id === selectedTemplate.id) || selectedTemplate) : null;
+
+  if (!fbReady) return <LoadingScreen error={fbError} />;
+  if (authLoading) return (
+    <div style={{ minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg0 }}>
+      <Spinner size={40} />
+    </div>
+  );
+
+  const pageProps = { fb, authUser, showToast, setPage:navSetPage };
+
+  return (
+    <div style={{ minHeight:"100vh", background:`linear-gradient(160deg,${C.bg0} 0%,${C.bg1} 50%,${C.bg0} 100%)`,
+      color:"#fff", fontFamily:"'Sora',system-ui,sans-serif", position:"relative" }}>
+      <AnimBg />
+      <div style={{ position:"relative", zIndex:1 }}>
+        <Nav page={page} setPage={navSetPage} authUser={authUser} onLogout={logout} />
+        {page==="landing" && <Landing setPage={navSetPage} />}
+        {page==="login" && <AuthPage mode="login" {...pageProps} onAuth={setAuthUser} />}
+        {page==="register" && <AuthPage mode="register" {...pageProps} onAuth={setAuthUser} />}
+        {page==="dashboard" && <Dashboard {...pageProps} setSelectedTemplate={setSelectedTemplate} templates={mergedTemplates} />}
+        {page==="template-detail" && <TemplateDetail template={liveTemplate} {...pageProps} />}
+        {page==="generated" && <GeneratedPreview template={liveTemplate} {...pageProps} />}
+        {page==="admin" && isAdmin && <AdminPanel {...pageProps} customTemplates={customTemplates} reloadTemplates={reloadTemplates} />}
+      </div>
+      {isAdmin && (
+        <button onClick={()=>navSetPage("admin")} title="Admin Panel"
+          style={{ position:"fixed",bottom:20,right:20,width:36,height:36,borderRadius:"50%",
+            background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.2)",
+            cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:99 }}>
+          <Icon d={IC.settings} size={16} stroke="#F87171" />
+        </button>
+      )}
+      {toast && <Toast msg={toast.msg} type={toast.type} onClose={()=>setToast(null)} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
